@@ -13,84 +13,99 @@ TYPE_MAP = {
 
 def build_tools():
     tool_schemas = []
-
     for name, func in inspect.getmembers(tools, inspect.isfunction):
         signature = inspect.signature(func)
-
         properties = {}
         required = []
 
         for param_name, param in signature.parameters.items():
             annotation = param.annotation
-
             json_type = TYPE_MAP.get(annotation, "string")
-
-            properties[param_name] = {
-                "type": json_type
-            }
-
+            properties[param_name] = {"type": json_type}
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
 
-        tool_schemas.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": inspect.getdoc(func) or "",
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": required,
-                        "additionalProperties": False
-                    }
+        tool_schemas.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": inspect.getdoc(func) or "",
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False
                 }
             }
-        )
-
+        })
     return tool_schemas
 
 def main():
     tool_schemas = build_tools()
-
     agent_instance = agent.Agent()
 
-    running = True
-    while running:
+    print("--- Database Manager Agent Started ---")
 
-        user_input = input(" >>> Make your query:").strip()
+    while True:
+        user_input = input("\n >>> Make your query (or 'exit' to quit): ").strip()
 
+        if user_input.lower() == 'exit':
+            break
         if user_input == "":
             print("Write something meaningful!")
             continue
 
-        # message management: first user role, then tool calls
-        message_role = "user"
-        new_message = user_input
+        agent_instance.start_new_task(user_input)
+        
+        work_finished = False
+        response = None
+
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
         while not work_finished:
-            response = agent_instance.send_to_model(
-                new_message,
-                role=message_role,
-                tools=tool_schemas
-            )
+            response, usage = agent_instance.send_to_model(tools_schema=tool_schemas)
 
-            selected_tool = getattr(tools, response.tool_name)
-            inputs = response.input_parameters
+            if usage:
+                total_prompt_tokens += usage.prompt_tokens
+                total_completion_tokens += usage.completion_tokens
 
-            print(f" - TOOL CALL: {selected_tool.name}  INPUTS: {inputs}")
-
-            if isinstance(inputs, dict):
-                tool_output = selected_tool(**inputs)
-            elif isinstance(inputs, list):
-                tool_output = selected_tool(*inputs)
+            if response.finished:
+                work_finished = True
+                agent_instance.finish_task(response.final_answer)
+                print(f" <<< {response.final_answer}")
             else:
-                tool_output = selected_tool(inputs)
-            
-            new_message = tool_output
-            message_role = "tool_output"
-            work_finished = response.finished
-            
-        print(f" <<< {response.final_answer}")
+                if not response.tool_name:
+                    print("Status: Agent got stuck without calling a tool.")
+                    break
 
-if __name__=="__main__":
+                try:
+                    selected_tool = getattr(tools, response.tool_name)
+                    inputs = response.input_parameters
+
+                    print(f" - TOOL CALL: {response.tool_name} | INPUTS: {inputs}")
+
+                    if isinstance(inputs, dict):
+                        tool_output = selected_tool(**inputs)
+                    elif isinstance(inputs, list):
+                        tool_output = selected_tool(*inputs)
+                    else:
+                        tool_output = selected_tool(inputs)
+
+                    agent_instance.add_tool_execution(response.tool_name, inputs, tool_output)
+
+                except AttributeError:
+                    error_msg = f"Error: Tool '{response.tool_name}' does not exist."
+                    print(f" - {error_msg}")
+                    agent_instance.add_tool_execution(response.tool_name, inputs, error_msg)
+                except Exception as e:
+                    error_msg = f"Error executing tool: {str(e)}"
+                    print(f" - {error_msg}")
+                    agent_instance.add_tool_execution(response.tool_name, inputs, error_msg)
+
+        print(f" [Token Usage -> Prompt: {total_prompt_tokens} | Completion: {total_completion_tokens} | Total: {total_prompt_tokens + total_completion_tokens}]")
+
+    print("Agent Goes Back To Sleep")
+
+if __name__ == "__main__":
     main()
