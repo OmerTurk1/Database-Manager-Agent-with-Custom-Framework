@@ -18,6 +18,8 @@ TYPE_MAP = {
 
 FRONT_CHARS = int(os.getenv("FRONT_CHARS"))
 BACK_CHARS = int(os.getenv("BACK_CHARS"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 def truncate_strings(data):
     if isinstance(data, dict):
         return {k: truncate_strings(v) for k, v in data.items()}
@@ -63,12 +65,12 @@ def build_tools():
 
 def main():
     tool_schemas = build_tools()
-    agent_instance = agent.Agent()
+    agent_instance = agent.Agent(OPENAI_API_KEY)
 
     print("--- Database Manager Agent Started ---")
 
     while True:
-        user_input = input("\n >>> Make your query (or 'exit'):").strip()
+        user_input = input("\n >>> Make your query (or 'exit'): ").strip()
 
         if user_input.lower() == 'exit':
             break

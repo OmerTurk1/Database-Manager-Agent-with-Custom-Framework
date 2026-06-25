@@ -2,8 +2,6 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import Any, Union
 
-client = OpenAI()
-
 AllowedParamTypes = Union[str, int, float, bool, list[str], dict[str, str]]
 
 class OutputFormat(BaseModel):
@@ -25,9 +23,10 @@ class OutputFormat(BaseModel):
     )
 
 class Agent:
-    def __init__(self):
+    def __init__(self, apikey):
         self.old_memory = []
         self.current_run_steps = []
+        self.client = OpenAI(api_key=apikey)
 
     def start_new_task(self, user_input: str):
         self.current_run_steps = [
@@ -70,7 +69,7 @@ Return a valid OutputFormat object. Focus on the current task sequence."""
 
         messages = [system_instruction] + self.current_run_steps
 
-        raw_completion = client.beta.chat.completions.parse(
+        raw_completion = self.client.beta.chat.completions.parse(
             model="gpt-4.1-mini", 
             messages=messages,
             response_format=OutputFormat
