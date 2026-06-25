@@ -1,12 +1,14 @@
 import os
 import shutil
 from typing import Dict, List, Union
+import sqlite3
 from dotenv import load_dotenv
+import pandas as pd
+import numpy as np
 
 load_dotenv()
 
 MAIN_ROOT_FOLDER = os.getenv("MAIN_ROOT_FOLDER") 
-
 VIEWABLE_FOLDER_ROOT = os.getenv("VIEWABLE_FOLDER_ROOT") 
 
 if not MAIN_ROOT_FOLDER or not VIEWABLE_FOLDER_ROOT:
@@ -40,9 +42,23 @@ def _resolve_and_validate_path(path_str: str, allowed_root: str) -> str:
 def _resolve_read_path(path_str: str) -> str:
     """
     Okuma işlemleri için yolu doğrular. 
-    1. Önce MAIN_ROOT_FOLDER üzerinde yolu çözümler ve dosya/klasör gerçekten VAR MI diye bakar.
-    2. Eğer MAIN_ROOT_FOLDER içinde yoksa veya yetki hatası alınırsa, VIEWABLE_FOLDER_ROOT dizinine bakar.
+    Hem MAIN_ROOT_FOLDER hem de VIEWABLE_FOLDER_ROOT sınırlarını esnekçe kontrol eder.
     """
+    if os.path.isabs(path_str):
+        normalized = os.path.realpath(os.path.normpath(path_str))
+        
+        # MAIN_ROOT_FOLDER control
+        real_main = os.path.realpath(MAIN_ROOT_FOLDER)
+        if normalized.startswith(real_main) and os.path.exists(normalized):
+            return normalized
+            
+        # VIEWABLE_FOLDER_ROOT control
+        real_viewable = os.path.realpath(VIEWABLE_FOLDER_ROOT)
+        if normalized.startswith(real_viewable):
+            return normalized
+            
+        raise PermissionError(f"Access Denied: Absolute path '{path_str}' is outside allowed roots.")
+
     try:
         main_path = _resolve_and_validate_path(path_str, MAIN_ROOT_FOLDER)
         if os.path.exists(main_path):
@@ -256,3 +272,187 @@ def move_file(file_name: str, new_location: str) -> str:
         
     except Exception as e:
         return f"Error moving element: {str(e)}"
+    
+@register_tool
+def execute_sql_query(db_path: str, query: str) -> Union[List[Dict[str, any]], str]:
+    """
+    Execute any SQL query (SELECT, INSERT, UPDATE, CREATE, etc.) on a specified 
+    SQLite database file located within either MAIN_ROOT_FOLDER or VIEWABLE_FOLDER_ROOT.
+
+    Parameters:
+        db_path (str): Name, relative path, or absolute path of the SQLite database file (e.g., 'data.db').
+        query (str): The raw SQL query to execute on the database.
+
+    Returns:
+        list or str: A list of dictionaries for data-returning queries, a success message for modifications, 
+                     or an error message string.
+    """
+    try:
+        # db_path ifadesini her iki root dizine göre de doğrula ve gerçek yolunu bul
+        target_db_path = _resolve_read_path(db_path)
+        
+        if not os.path.exists(target_db_path):
+            return f"Error: Database file '{db_path}' not found in allowed directories."
+            
+        if os.path.isdir(target_db_path):
+            return f"Error: '{db_path}' is a directory, not a valid SQLite database file."
+
+        # Veritabanına bağlan
+        conn = sqlite3.connect(target_db_path)
+        
+        # Sütun isimlerini anahtar (key) olarak almak için row_factory ayarı
+        conn.row_factory = lambda cursor, row: {
+            col[0]: row[idx] for idx, col in enumerate(cursor.description)
+        }
+        
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        # Eğer sorgu veri dönen bir sorguysa (SELECT gibi) sonuçları al
+        if cursor.description:
+            results = cursor.fetchall()
+            conn.close()
+            if not results:
+                return "Query executed successfully, but returned 0 rows."
+            return results
+        
+        # Eğer sorgu veritabanını değiştiren bir sorguysa (INSERT, UPDATE, DELETE, CREATE vb.) commit et
+        else:
+            conn.commit()
+            affected_rows = cursor.rowcount
+            conn.close()
+            return f"Query executed successfully. Affected rows: {affected_rows if affected_rows >= 0 else 0}"
+
+    except sqlite3.Error as se:
+        return f"SQLite Error: {str(se)}"
+    except Exception as e:
+        return f"Error executing SQL query: {str(e)}"
+
+@register_tool
+def get_descriptive_stats(file_path: str, numeric_only: bool = True) -> Union[List[Dict[str, any]], str]:
+    """
+    Calculate summary statistics (mean, median, std, min, max, quartiles) for numerical columns,
+    or frequency counts for categorical columns.
+
+    Parameters:
+        file_path (str): Name or relative/absolute path of the data file.
+        numeric_only (bool): If True, returns descriptive stats for numbers. If False, analyzes objects/categories.
+
+    Returns:
+        list or str: A list of dictionaries containing statistical metrics per column, or an error description.
+    """
+    try:
+        target_path = _resolve_read_path(file_path)
+        
+        if target_path.endswith('.csv'):
+            df = pd.read_csv(target_path)
+        elif target_path.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(target_path)
+        elif target_path.endswith('.parquet'):
+            df = pd.read_parquet(target_path)
+        else:
+            return "Error: Unsupported file format."
+
+        if numeric_only:
+            stats_df = df.describe(include=[np.number]).T
+            stats_df['median'] = df.median(numeric_only=True)
+        else:
+            stats_df = df.describe(include=[object, 'category']).T
+            
+        stats_df = stats_df.reset_index().rename(columns={'index': 'column'})
+        return stats_df.to_dict(orient='records')
+        
+    except Exception as e:
+        return f"Error generating descriptive stats: {str(e)}"
+    
+@register_tool
+def get_dataframe_summary(file_path: str) -> str:
+    """
+    Load a data file (CSV, Excel, or Parquet) and return a comprehensive structural summary.
+    Includes shape, columns, data types, missing values, and memory usage.
+
+    Parameters:
+        file_path (str): Name or relative/absolute path of the data file (e.g., 'dataset.csv').
+
+    Returns:
+        str: A formatted text summary of the dataset or an error message.
+    """
+    try:
+        target_path = _resolve_read_path(file_path)
+        
+        if target_path.endswith('.csv'):
+            df = pd.read_csv(target_path, nrows=5)
+            full_shape = pd.read_csv(target_path).shape
+            df_full = pd.read_csv(target_path)
+        elif target_path.endswith(('.xls', '.xlsx')):
+            df_full = pd.read_excel(target_path)
+        elif target_path.endswith('.parquet'):
+            df_full = pd.read_parquet(target_path)
+        else:
+            return "Error: Unsupported file format. Please provide a .csv, .xlsx, or .parquet file."
+
+        summary = []
+        summary.append(f"--- Dataset Summary for '{os.path.basename(file_path)}' ---")
+        summary.append(f"Dimensions: {df_full.shape[0]} rows, {df_full.shape[1]} columns\n")
+        
+        # Sütun bilgileri tablosu
+        summary.append(f"{'Column':<25} | {'DataType':<12} | {'Non-Null Count':<15} | {'Missing %':<10}")
+        summary.append("-" * 70)
+        
+        missing_series = df_full.isnull().sum()
+        for col in df_full.columns:
+            dtype = str(df_full[col].dtype)
+            non_null = df_full[col].notnull().sum()
+            missing_pct = (missing_series[col] / len(df_full)) * 100
+            summary.append(f"{col:<25} | {dtype:<12} | {non_null:<15} | {missing_pct:.2f}%")
+            
+        return "\n".join(summary)
+        
+    except Exception as e:
+        return f"Error analyzing dataset summary: {str(e)}"
+    
+@register_tool
+def query_dataframe(file_path: str, query_expr: str, columns: List[str] = None, limit: int = 20) -> Union[List[Dict[str, any]], str]:
+    """
+    Filter and query a flat data file (CSV/Parquet/Excel) using a pandas query string expression.
+    Acts like a lightweight SQL SELECT over static files.
+
+    Parameters:
+        file_path (str): Name or relative/absolute path of the data file.
+        query_expr (str): Pandas filter expression string, e.g., "age > 30 and status == 'Active'". 
+                          Pass an empty string "" to just fetch rows without filtering.
+        columns (list): Optional list of specific columns to project/return.
+        limit (int): Maximum number of rows to return (default 20) to prevent token overflow.
+
+    Returns:
+        list or str: Filtered rows as a list of dictionaries, or an error message.
+    """
+    try:
+        target_path = _resolve_read_path(file_path)
+        
+        if target_path.endswith('.csv'):
+            df = pd.read_csv(target_path)
+        elif target_path.endswith(('.xls', '.xlsx')):
+            df = pd.read_excel(target_path)
+        elif target_path.endswith('.parquet'):
+            df = pd.read_parquet(target_path)
+        else:
+            return "Error: Unsupported file format."
+
+        if columns:
+            valid_cols = [c for c in columns if c in df.columns]
+            if not valid_cols:
+                return f"Error: None of the requested columns exist. Available: {list(df.columns)}"
+            df = df[valid_cols]
+
+        if query_expr.strip():
+            df = df.query(query_expr)
+            
+        results = df.head(limit).to_dict(orient='records')
+        if not results:
+            return "Query executed successfully, but returned 0 rows matching the criteria."
+            
+        return results
+        
+    except Exception as e:
+        return f"Error executing dataframe query: {str(e)}"

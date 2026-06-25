@@ -1,0 +1,66 @@
+[
+  {
+    "plaka": "34ABC123",
+    "marka": "Toyota",
+    "model": "Corolla",
+    "uretim_yili": 2018,
+    "kilometre": 45000,
+    "renk": "Beyaz"
+  },
+  {
+    "plaka": "06XYZ789",
+    "marka": "Honda",
+    "model": "Civic",
+    "uretim_yili": 2020,
+    "kilometre": 30000,
+    "renk": "Siyah"
+  },
+  {
+    "plaka": "35DEF456",
+    "marka": "Ford",
+    "model": "Focus",
+    "uretim_yili": 2017,
+    "kilometre": 60000,
+    "renk": "Kırmızı"
+  },
+  {
+    "plaka": "34GHI789",
+    "marka": "BMW",
+    "model": "320i",
+    "uretim_yili": 2019,
+    "kilometre": 40000,
+    "renk": "Mavi"
+  },
+  {
+    "plaka": "06JKL123",
+    "marka": "Audi",
+    "model": "A4",
+    "uretim_yili": 2016,
+    "kilometre": 55000,
+    "renk": "Gri"
+  },
+  {
+    "plaka": "35MNO456",
+    "marka": "Nissan",
+    "model": "Sentra",
+    "uretim_yili": 2018,
+    "kilometre": 48000,
+    "renk": "Beyaz"
+  },
+  {
+    "plaka": "06PQR789",
+    "marka": "Chevrolet",
+    "model": "Malibu",
+    "uretim_yili": 2017,
+    "kilometre": 52000,
+    "renk": "Kırmızı"
+  },
+  {
+    "plaka": "34STU123",
+    "marka": "Volkswagen",
+    "model": "Passat",
+    "uretim_yili": 2020,
+    "kilometre": 35000,
+    "renk": "Siyah"
+  }
+]

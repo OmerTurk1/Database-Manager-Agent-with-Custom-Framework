@@ -126,7 +126,7 @@ def main():
                     traceback.print_exc()
                     agent_instance.add_tool_execution(response.tool_name, inputs, error_msg)
 
-        print(f" [Token Usage -> Prompt: {total_prompt_tokens} | Completion: {total_completion_tokens} | Total: {total_prompt_tokens + total_completion_tokens}]")
+        print(f"\n [Token Usage -> Prompt: {total_prompt_tokens} | Completion: {total_completion_tokens} | Total: {total_prompt_tokens + total_completion_tokens}]")
 
     print("Agent Goes Back To Sleep")
 
